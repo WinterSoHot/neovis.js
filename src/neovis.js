@@ -160,6 +160,30 @@ export default class NeoVis {
 			node.label = captionKey(neo4jNode);
 		} else {
 			node.label = neo4jNode.properties[captionKey] || label || '';
+			if(label=="grid_ods_equ_m_t_sb_znyc_dz") {
+            node['label'] = neo4jNode.properties['bdzmc'];
+        }
+        if(label=="grid_ods_equ_m_t_sb_znyc_zbyq") {
+            node['label'] = neo4jNode.properties['sbmc'];
+        }
+		if(label=="grid_ods_equ_m_t_dw_bzzx_sccj_hbsj_temp") {
+            node['label'] = neo4jNode.properties['sccjmc']
+        }
+        if(label=="grid_ods_equ_t_t_zh_ztjx_syjl") {
+            node['label'] = "试验记录";
+        }
+        if(label=="grid_ods_equ_t_t_yj_dwyj_xs_znxsjl") {
+            node['label'] = "巡视记录";
+        }
+       if(label=="grid_ods_equ_t_t_yj_dwyj_yhjl") {
+            node['label'] = "隐患记录";
+        }
+        if(label=="grid_ods_equ_t_t_yj_dwyj_xsjl") {
+            node['label'] = "修试记录";
+        }
+        if(label=="grid_ods_equ_t_t_yj_dwyj_qxjl") {
+            node['label'] = "缺陷记录";
+        }
 		}
 
 		// community
@@ -239,16 +263,42 @@ export default class NeoVis {
 
 		return edge;
 	}
-    
+
 	propertyToString(key, value) {
+			let key2value = {
+            zz: "站址",
+            bdzmc: "变电站",
+            ywdwmc: "运维单位",
+            yxztmc: "设备状态",
+            ssdsmc: "所属地市",
+            dydjmc:'电压等级',
+            whbzmc:'维护班组',
+            sbmc:'设备名称',
+            mc:'试验名称',
+            sydw:'试验单位',
+            sydd:'试验地点',
+            qxzt:'缺陷状态',
+            qxzsbmc:'缺陷主设备名称',
+            djbzmc:'登记班组名称',
+            wcqk:'完成情况',
+            xsnr:'巡视内容',
+            yhms:'隐患描述',
+            yhzt:'隐患状态',
+        };
+		if (key2value[key] == undefined || value == "\\N" || value == "none") {
+			return "";
+		}
+
 		if (Array.isArray(value) && value.length > 1) {
-			let out = `<strong>${key}:</strong><br /><ul>`;
+			// let out = `<strong>${key}:</strong><br /><ul>`;
+			let out = `<strong>${key2value[key]}:</strong><br /><ul>`;
 			for (let val of value) {
 				out += `<li>${val}</li>`;
 			}
 			return out + '</ul>';
 		}
-		return  `<strong>${key}:</strong> ${value}<br>`;
+		// return  `<strong>${key}:</strong> ${value}<br>`;
+		return  `<strong>${key2value[key]}:</strong> ${value}<br>`;
 	}
 
 	// public API
@@ -408,6 +458,126 @@ export default class NeoVis {
 							neoVis._events.generateEvent(ClickEdgeEvent, {edgeId: edgeId, edge: neoVis._edges[edgeId]});
 						}
 					});
+				},
+				onError: (error) => {
+					this._consoleLog(error, 'error');
+					this._events.generateEvent(ErrorEvent, {error_msg: error});
+				}
+			});
+	}
+
+	/**
+	 * 增加节点数据
+	 */
+	addDataByCypher(cypher){
+		let recordCount = 0;
+		let session = this._driver.session();
+		const dataBuildPromises = [];
+		let new_nodes = {};
+		let new_edges = {};
+		session
+			.run(cypher)
+			.subscribe({
+				onNext: (record) => {
+					recordCount++;
+
+					this._consoleLog('CLASS NAME');
+					this._consoleLog(record && record.constructor.name);
+					this._consoleLog(record);
+
+					const dataPromises = Object.values(record.toObject()).map(async (v) => {
+						this._consoleLog('Constructor:');
+						this._consoleLog(v && v.constructor.name);
+						if (v instanceof Neo4j.types.Node) {
+							let node = await this.buildNodeVisObject(v, session);
+							try {
+								if(!this._nodes.hasOwnProperty(node.id)){
+									this._nodes[node.id] = node;
+									new_nodes[node.id] = node;
+								}
+							} catch (e) {
+								this._consoleLog(e, 'error');
+							}
+
+						} else if (v instanceof Neo4j.types.Relationship) {
+							let edge = this.buildEdgeVisObject(v);
+							if(!this._edges.hasOwnProperty(edge.id)){
+								this._edges[edge.id] = edge;
+								new_edges[edge.id] = edge;
+							}
+
+						} else if (v instanceof Neo4j.types.Path) {
+							this._consoleLog('PATH');
+							this._consoleLog(v);
+							let startNode = await this.buildNodeVisObject(v.start, session);
+							let endNode = await this.buildNodeVisObject(v.end, session);
+							if(!this._nodes.hasOwnProperty(startNode.id)){
+								new_nodes[startNode.id] = startNode;
+								this._nodes[startNode.id] = startNode;
+							}
+							if(!this._nodes.hasOwnProperty(endNode.id)){
+								new_nodes[endNode.id] = endNode;
+								this._nodes[endNode.id] = endNode;
+							}
+
+							for (let obj of v.segments) {
+								let startNode = await this.buildNodeVisObject(obj.start, session);
+								let endNode = await this.buildNodeVisObject(obj.end, session);
+								if(!this._nodes.hasOwnProperty(startNode.id)){
+									new_nodes[startNode.id] = startNode;
+									this._nodes[startNode.id] = startNode;
+								}
+								if(!this._nodes.hasOwnProperty(endNode.id)){
+									new_nodes[endNode.id] = endNode;
+									this._nodes[endNode.id] = endNode;
+								}
+								edge = this.buildEdgeVisObject(obj.relationship);
+								if(!this._edges.hasOwnProperty(edge.id)){
+									new_edges[edge.id] = edge;
+									this._edges[edge.id] = edge;
+								}
+							}
+
+						} else if (v instanceof Array) {
+							for (let obj of v) {
+								this._consoleLog('Array element constructor:');
+								this._consoleLog(obj && obj.constructor.name);
+								if (obj instanceof Neo4j.types.Node) {
+									let node = await this.buildNodeVisObject(obj, session);
+									if(!this._nodes.hasOwnProperty(node.id))
+										new_nodes[node.id] = node;
+
+								} else if (obj instanceof Neo4j.types.Relationship) {
+									let edge = this.buildEdgeVisObject(obj);
+									if(!this._edges.hasOwnProperty(edge.id))
+										new_edges[edge.id] = edge;
+								}
+							}
+						}
+					});
+					dataBuildPromises.push(Promise.all(dataPromises));
+				},
+				onCompleted: async () => {
+					await Promise.all(dataBuildPromises);
+					session.close();
+					this._data.nodes.add(Object.values(new_nodes));
+					this._data.edges.add(Object.values(new_edges));
+
+
+					// Create duplicate node for any this reference relationships
+					// NOTE: Is this only useful for data model type data
+					// this._data.edges = this._data.edges.map(
+					//     function (item) {
+					//          if (item.from == item.to) {
+					//             const newNode = this._data.nodes.get(item.from)
+					//             delete newNode.id;
+					//             const newNodeIds = this._data.nodes.add(newNode);
+					//             this._consoleLog("Adding new node and changing this-ref to node: " + item.to);
+					//             item.to = newNodeIds[0];
+					//          }
+					//          return item;
+					//     }
+					// );
 				},
 				onError: (error) => {
 					this._consoleLog(error, 'error');
